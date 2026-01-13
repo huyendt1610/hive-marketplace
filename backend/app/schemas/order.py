@@ -18,6 +18,13 @@ class OrderCreate(BaseModel):
     payment_method: str  # 'card', 'upi', 'wallet'
 
 
+class BuyNowOrderCreate(BaseModel):
+    product_id: str
+    quantity: int
+    shipping_address: ShippingAddress
+    payment_method: str  # 'card', 'upi', 'wallet'
+
+
 class OrderItemResponse(BaseModel):
     id: str
     product_id: str

@@ -7,7 +7,7 @@ from app.models.order import Order, OrderItem
 from app.models.cart import Cart, CartItem
 from app.models.product import Product
 from app.models.user import User
-from app.schemas.order import OrderCreate, ShippingAddress
+from app.schemas.order import OrderCreate, ShippingAddress, BuyNowOrderCreate
 from app.services.payment_service import generate_transaction_id, generate_tracking_number
 from app.services.email_service import email_service
 
@@ -187,6 +187,119 @@ async def create_order(db: Session, user_id: str, order_data: OrderCreate) -> Or
                 order.id,
                 buyer.full_name,
                 seller_data["items"]
+            )
+    
+    return order
+
+
+async def create_buy_now_order(db: Session, user_id: str, order_data: BuyNowOrderCreate) -> Order:
+    """Create order directly from a single product (Buy Now)"""
+    import uuid
+    
+    # Get user
+    buyer = db.query(User).filter(User.id == user_id).first()
+    if not buyer:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Get and validate product
+    product = db.query(Product).filter(Product.id == order_data.product_id).first()
+    
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found"
+        )
+    
+    if product.status != "active":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Product is not available"
+        )
+    
+    if product.stock_quantity < order_data.quantity:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Insufficient stock. Available: {product.stock_quantity}"
+        )
+    
+    # Calculate totals
+    subtotal = product.price * order_data.quantity
+    total_amount = subtotal + SHIPPING_COST
+    
+    # Generate transaction ID
+    order_id = str(uuid.uuid4())
+    transaction_id = generate_transaction_id(order_id)
+    
+    # Create order
+    order = Order(
+        id=order_id,
+        buyer_id=user_id,
+        total_amount=total_amount,
+        status="pending",
+        shipping_name=order_data.shipping_address.name,
+        shipping_address_line1=order_data.shipping_address.address_line1,
+        shipping_address_line2=order_data.shipping_address.address_line2,
+        shipping_city=order_data.shipping_address.city,
+        shipping_state=order_data.shipping_address.state,
+        shipping_pincode=order_data.shipping_address.pincode,
+        shipping_mobile=order_data.shipping_address.mobile,
+        payment_method=order_data.payment_method,
+        payment_transaction_id=transaction_id
+    )
+    db.add(order)
+    
+    # Create order item
+    order_item = OrderItem(
+        order_id=order_id,
+        product_id=product.id,
+        quantity=order_data.quantity,
+        price_at_order=product.price,
+        seller_id=product.seller_id
+    )
+    db.add(order_item)
+    
+    # Deduct stock
+    product.stock_quantity -= order_data.quantity
+    
+    db.commit()
+    db.refresh(order)
+    
+    # Send order confirmation email to buyer
+    email_items = [{
+        "title": product.title,
+        "quantity": order_data.quantity,
+        "subtotal": subtotal
+    }]
+    
+    await email_service.send_order_confirmation(
+        buyer.email,
+        buyer.full_name,
+        order.id,
+        total_amount,
+        email_items
+    )
+    
+    # Notify seller
+    seller = db.query(User).filter(User.id == product.seller_id).first()
+    if seller:
+        await email_service.send_new_order_notification(
+            seller.email,
+            seller.full_name,
+            order.id,
+            buyer.full_name,
+            [{"title": product.title, "quantity": order_data.quantity}]
+        )
+        
+        # Check if product is now out of stock
+        if product.stock_quantity == 0:
+            await email_service.send_out_of_stock_alert(
+                seller.email,
+                seller.full_name,
+                product.title,
+                product.id
             )
     
     return order

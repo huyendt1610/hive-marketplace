@@ -3,11 +3,11 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from app.database import get_db
 from app.schemas.order import (
-    OrderCreate, OrderResponse, OrderListResponse, OrderShipResponse
+    OrderCreate, OrderResponse, OrderListResponse, OrderShipResponse, BuyNowOrderCreate
 )
 from app.services.order_service import (
     create_order, get_order_by_id, get_orders_list, 
-    get_order_detail, mark_order_shipped
+    get_order_detail, mark_order_shipped, create_buy_now_order
 )
 from app.middleware.auth import get_current_user
 from app.models.user import User
@@ -31,6 +31,26 @@ async def checkout(
     - Sends confirmation emails
     """
     order = await create_order(db, current_user.id, order_data)
+    order_detail = get_order_detail(db, order, current_user.id, current_user.account_type)
+    return order_detail
+
+
+@router.post("/buy-now", status_code=status.HTTP_201_CREATED)
+async def buy_now(
+    order_data: BuyNowOrderCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Create order directly from a single product (Buy Now)
+    - Bypasses cart
+    - Validates product and stock
+    - Creates order with shipping address
+    - Processes mock payment
+    - Deducts stock
+    - Sends confirmation emails
+    """
+    order = await create_buy_now_order(db, current_user.id, order_data)
     order_detail = get_order_detail(db, order, current_user.id, current_user.account_type)
     return order_detail
 
