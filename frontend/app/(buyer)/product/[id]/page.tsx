@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
-import { Star, ShoppingCart } from "lucide-react";
+import { Star, ShoppingCart, Zap } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/Button";
 import { useCartStore } from "@/store/cartStore";
+import { useBuyNowStore } from "@/store/buyNowStore";
 import { useToast } from "@/components/Toast";
 import { StarRating } from "@/components/StarRating";
 import { ReviewCard, RatingDistribution } from "@/components/ReviewCard";
@@ -48,6 +49,7 @@ interface ReviewsData {
 
 export default function ProductDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const productId = params.id as string;
   const toast = useToast();
   const [product, setProduct] = useState<Product | null>(null);
@@ -55,7 +57,9 @@ export default function ProductDetailPage() {
   const [selectedImage, setSelectedImage] = useState(0);
   const [quantity, setQuantity] = useState(1);
   const [addingToCart, setAddingToCart] = useState(false);
+  const [buyingNow, setBuyingNow] = useState(false);
   const { addItem } = useCartStore();
+  const { setItem: setBuyNowItem } = useBuyNowStore();
   
   // Reviews state
   const [reviewsData, setReviewsData] = useState<ReviewsData | null>(null);
@@ -131,6 +135,25 @@ export default function ProductDetailPage() {
     } finally {
       setAddingToCart(false);
     }
+  };
+
+  const handleBuyNow = () => {
+    if (!product) return;
+    
+    setBuyingNow(true);
+    
+    // Set buy now item in store
+    setBuyNowItem({
+      productId: product.id,
+      title: product.title,
+      price: product.price,
+      images: product.images || [],
+      quantity,
+      seller: product.seller,
+    });
+    
+    // Navigate to checkout
+    router.push("/checkout");
   };
 
   if (loading) {
@@ -276,15 +299,27 @@ export default function ProductDetailPage() {
             </div>
           )}
 
-          <Button
-            onClick={handleAddToCart}
-            disabled={product.stock_quantity === 0 || addingToCart}
-            isLoading={addingToCart}
-            className="w-full"
-          >
-            {!addingToCart && <ShoppingCart className="w-5 h-5 mr-2" />}
-            Add to Cart
-          </Button>
+          <div className="flex gap-3">
+            <Button
+              onClick={handleAddToCart}
+              disabled={product.stock_quantity === 0 || addingToCart || buyingNow}
+              isLoading={addingToCart}
+              variant="secondary"
+              className="flex-1"
+            >
+              {!addingToCart && <ShoppingCart className="w-5 h-5 mr-2" />}
+              Add to Cart
+            </Button>
+            <Button
+              onClick={handleBuyNow}
+              disabled={product.stock_quantity === 0 || addingToCart || buyingNow}
+              isLoading={buyingNow}
+              className="flex-1"
+            >
+              {!buyingNow && <Zap className="w-5 h-5 mr-2" />}
+              Buy Now
+            </Button>
+          </div>
         </div>
       </div>
 

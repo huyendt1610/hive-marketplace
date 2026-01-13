@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useCartStore } from "@/store/cartStore";
+import { useBuyNowStore } from "@/store/buyNowStore";
 import { useToast } from "@/components/Toast";
 import { Skeleton } from "@/components/Skeleton";
 import { AuthRequiredGuard } from "@/app/utils/RoleGuard";
@@ -69,10 +70,12 @@ function CheckoutContent() {
   const router = useRouter();
   const toast = useToast();
   const { clearCart } = useCartStore();
+  const { item: buyNowItem, clearItem: clearBuyNowItem } = useBuyNowStore();
   const [cart, setCart] = useState<CartData | null>(null);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
   const [step, setStep] = useState(1);
+  const [isBuyNowMode, setIsBuyNowMode] = useState(false);
   
   const [shippingAddress, setShippingAddress] = useState<ShippingAddress>({
     name: "",
@@ -88,7 +91,32 @@ function CheckoutContent() {
   const [errors, setErrors] = useState<Partial<ShippingAddress>>({});
 
   useEffect(() => {
-    loadCart();
+    // Check if we're in buy now mode
+    if (buyNowItem) {
+      setIsBuyNowMode(true);
+      // Create cart-like structure from buy now item
+      setCart({
+        id: "buy-now",
+        items: [{
+          id: "buy-now-item",
+          product: {
+            id: buyNowItem.productId,
+            title: buyNowItem.title,
+            price: buyNowItem.price,
+            images: buyNowItem.images,
+            stock_quantity: 999, // Not relevant for display
+            seller: buyNowItem.seller,
+          },
+          quantity: buyNowItem.quantity,
+          subtotal: buyNowItem.price * buyNowItem.quantity,
+        }],
+        total_items: buyNowItem.quantity,
+        total_amount: buyNowItem.price * buyNowItem.quantity,
+      });
+      setLoading(false);
+    } else {
+      loadCart();
+    }
   }, []);
 
   const loadCart = async () => {
@@ -152,23 +180,49 @@ function CheckoutContent() {
       // Simulate payment processing delay
       await new Promise(resolve => setTimeout(resolve, 2000));
       
-      const orderData = {
-        shipping_address: {
-          name: shippingAddress.name,
-          address_line1: shippingAddress.address_line1,
-          address_line2: shippingAddress.address_line2 || null,
-          city: shippingAddress.city,
-          state: shippingAddress.state,
-          pincode: shippingAddress.pincode,
-          mobile: shippingAddress.mobile,
-        },
-        payment_method: paymentMethod,
-      };
+      let order: { id: string };
       
-      const order = await api.post<{ id: string }>("/api/orders", orderData);
-      
-      // Clear cart in store
-      clearCart();
+      if (isBuyNowMode && buyNowItem) {
+        // Buy Now order
+        const orderData = {
+          product_id: buyNowItem.productId,
+          quantity: buyNowItem.quantity,
+          shipping_address: {
+            name: shippingAddress.name,
+            address_line1: shippingAddress.address_line1,
+            address_line2: shippingAddress.address_line2 || null,
+            city: shippingAddress.city,
+            state: shippingAddress.state,
+            pincode: shippingAddress.pincode,
+            mobile: shippingAddress.mobile,
+          },
+          payment_method: paymentMethod,
+        };
+        
+        order = await api.post<{ id: string }>("/api/orders/buy-now", orderData);
+        
+        // Clear buy now item
+        clearBuyNowItem();
+      } else {
+        // Cart order
+        const orderData = {
+          shipping_address: {
+            name: shippingAddress.name,
+            address_line1: shippingAddress.address_line1,
+            address_line2: shippingAddress.address_line2 || null,
+            city: shippingAddress.city,
+            state: shippingAddress.state,
+            pincode: shippingAddress.pincode,
+            mobile: shippingAddress.mobile,
+          },
+          payment_method: paymentMethod,
+        };
+        
+        order = await api.post<{ id: string }>("/api/orders", orderData);
+        
+        // Clear cart in store
+        clearCart();
+      }
       
       toast.success("Order placed successfully!");
       
