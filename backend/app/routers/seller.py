@@ -1,11 +1,14 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from math import ceil
 from app.database import get_db
 from app.middleware.auth import require_seller
 from app.models.user import User
 from app.models.product import Product
 from app.models.order import Order, OrderItem
+from app.schemas.product import ProductResponse, ProductListResponse
+from app.services.product_service import get_seller_products, get_products_with_ratings
 
 router = APIRouter()
 
@@ -56,3 +59,34 @@ async def get_seller_stats(
         "total_revenue": float(total_revenue),
         "low_stock_products": low_stock_products
     }
+
+
+@router.get("/products", response_model=ProductListResponse)
+async def get_my_products(
+    page: int = Query(1, ge=1),
+    limit: int = Query(100, ge=1, le=100),
+    current_user: User = Depends(require_seller),
+    db: Session = Depends(get_db)
+):
+    """Get all products for the currently logged-in seller"""
+    products, total = get_seller_products(db, current_user.id, page, limit)
+    
+    enriched = get_products_with_ratings(db, products)
+    
+    products_response = [
+        ProductResponse(
+            **enrich["product"].__dict__,
+            seller=enrich["seller"],
+            average_rating=enrich["average_rating"],
+            total_reviews=enrich["total_reviews"]
+        )
+        for enrich in enriched
+    ]
+    
+    return ProductListResponse(
+        products=products_response,
+        total=total,
+        page=page,
+        limit=limit,
+        total_pages=ceil(total / limit) if total > 0 else 1
+    )

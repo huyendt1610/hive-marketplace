@@ -153,6 +153,27 @@ def get_personalized_feed(db: Session, user_id: str, page: int = 1, limit: int =
     return get_trending_products(db, page, limit)
 
 
+def get_seller_products(
+    db: Session,
+    seller_id: str,
+    page: int = 1,
+    limit: int = 100
+) -> Tuple[List[Product], int]:
+    """Get all products for a specific seller"""
+    query = db.query(Product).filter(Product.seller_id == seller_id)
+    
+    total = query.count()
+    
+    # Order by newest first
+    query = query.order_by(Product.created_at.desc())
+    
+    # Pagination
+    offset = (page - 1) * limit
+    products = query.offset(offset).limit(limit).all()
+    
+    return products, total
+
+
 def get_product_rating_stats(db: Session, product_id: str) -> Tuple[float, int, dict]:
     """Get rating statistics for a product"""
     reviews = db.query(Review).filter(Review.product_id == product_id).all()

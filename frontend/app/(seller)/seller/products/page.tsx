@@ -36,9 +36,8 @@ export default function SellerProductsPage() {
   const loadProducts = async () => {
     try {
       setLoading(true);
-      // For now, we'll need to create a seller products endpoint
-      // Using the general products endpoint with seller filter
-      const response = await api.get<{ products: Product[] }>("/api/products?limit=100");
+      // Fetch only products belonging to the current seller
+      const response = await api.get<{ products: Product[] }>("/api/seller/products");
       setProducts(response.products);
     } catch (error) {
       console.error("Failed to load products:", error);
