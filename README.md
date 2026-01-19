@@ -360,48 +360,6 @@ Carts ── CartItems (cart_id)
 
 ---
 
-## 🎨 Brand Guidelines
-
-Hive follows a minimal, clean design language. Key principles:
-
-- **Colors**: Black & White primary, Honey (#F59E0B) accent
-- **Typography**: Inter font family
-- **Spacing**: 8px grid system
-- **Icons**: Lucide React (outline style)
-
-See [`brand-guidelines.md`](./brand-guidelines.md) for complete brand documentation.
-
----
-
-## 🧪 Testing
-
-### Manual Testing Checklist
-
-**Authentication**
-- [ ] Register as buyer
-- [ ] Register as seller
-- [ ] Login/logout flow
-- [ ] Profile update
-
-**Products**
-- [ ] Upload single product
-- [ ] Bulk CSV upload
-- [ ] Search and filter products
-- [ ] View product details
-
-**Shopping Flow**
-- [ ] Add to cart
-- [ ] Update quantities
-- [ ] Checkout process
-- [ ] Payment simulation
-
-**Seller Flow**
-- [ ] View dashboard stats
-- [ ] Manage products
-- [ ] Fulfill orders
-
----
-
 ## 🐳 Docker Commands
 
 ```bash
@@ -440,27 +398,6 @@ docker-compose exec frontend sh
 
 ---
 
-## 🛣️ Roadmap
-
-### Current (MVP)
-- ✅ Buyer/Seller authentication
-- ✅ Product management
-- ✅ Cart & checkout
-- ✅ Order management
-- ✅ Product reviews
-- ✅ Email notifications
-
-### Future Enhancements
-- [ ] Wishlist functionality
-- [ ] Real payment gateway (Razorpay/Stripe)
-- [ ] Real shipping integration
-- [ ] Buyer-seller messaging
-- [ ] Admin panel
-- [ ] Mobile apps (React Native)
-- [ ] Multi-language support
-
----
-
 ## 🤝 Contributing
 
 1. Fork the repository
@@ -470,21 +407,4 @@ docker-compose exec frontend sh
 5. Open a Pull Request
 
 ---
-
-## 📄 License
-
-This project is proprietary and confidential.
-
----
-
-## 📞 Support
-
-For questions or issues, please contact the development team.
-
----
-
-<div align="center">
-
-**Built with ❤️ for small sellers and smart shoppers**
-
-</div>
+Copyright©️ Codebasics Inc. All rights reserved.
