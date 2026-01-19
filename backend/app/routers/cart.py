@@ -34,7 +34,7 @@ async def get_cart(
         
         subtotal = product.price * item.quantity
         total_amount += subtotal
-        total_items += item.quantity
+        total_items += 1
         
         # Get seller info
         from app.models.user import User as UserModel
