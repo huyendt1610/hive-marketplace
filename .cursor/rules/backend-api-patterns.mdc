@@ -1,0 +1,24 @@
+---
+alwaysApply: true
+---
+
+# API Endpoint Structure
+
+- Use response_model for type safety 
+- Use appropriate HTTP status codes (201 for POST, 204 for DELETE)
+- Use Depends(get_async_session) for database sessions 
+- Use Query() with validation contraints (ge, le, min_length)
+- Let Pydantic schemas handle validation automatically 
+
+# Service Layer 
+- Accept AsyncSession in __init__
+- Use verb prefixes: get_, create_, update_, delete_, list_
+- Raise custom exceptions from app.core.exceptions 
+- Return domain models, not response schemas 
+- Keep all business logic in services, not endpoints 
+
+# Error Handling 
+- Use NotFoundError -> 404, Unauthorized -> 401, ForbiddenError -> 403, ValidationError -> 422
+- In Services: Raise exceptions, don't catch them 
+- In Endpoints: Let exceptions bubble to FastAPI handlers 
+- Log expected errors as warnings, unexpected as erros 

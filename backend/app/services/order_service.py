@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 from typing import Optional, List
 import math
+import logging
 
 from app.models.order import Order, OrderItem
 from app.models.cart import Cart, CartItem
@@ -13,6 +14,8 @@ from app.services.email_service import email_service
 
 # Shipping flat rate
 SHIPPING_COST = 50.0
+
+logger = logging.getLogger(__name__)
 
 
 def get_user_cart(db: Session, user_id: str) -> Cart:
@@ -69,240 +72,292 @@ def validate_cart_items(db: Session, cart: Cart) -> List[dict]:
 
 async def create_order(db: Session, user_id: str, order_data: OrderCreate) -> Order:
     """Create order from cart"""
-    # Get user
-    buyer = db.query(User).filter(User.id == user_id).first()
-    if not buyer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
+    log_context = {
+        "endpoint": "create_order",
+        "method": "POST",
+        "user_id": user_id,
+        "payment_method": order_data.payment_method,
+    }
+    logger.info("create_order request started", extra=log_context)
+
+    try:
+        # Get user
+        buyer = db.query(User).filter(User.id == user_id).first()
+        if not buyer:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        # Get and validate cart
+        cart = get_user_cart(db, user_id)
+        validated_items = validate_cart_items(db, cart)
+        
+        # Calculate totals
+        subtotal = sum(
+            item["product"].price * item["cart_item"].quantity 
+            for item in validated_items
         )
-    
-    # Get and validate cart
-    cart = get_user_cart(db, user_id)
-    validated_items = validate_cart_items(db, cart)
-    
-    # Calculate totals
-    subtotal = sum(
-        item["product"].price * item["cart_item"].quantity 
-        for item in validated_items
-    )
-    total_amount = subtotal + SHIPPING_COST
-    
-    # Generate transaction ID
-    import uuid
-    order_id = str(uuid.uuid4())
-    transaction_id = generate_transaction_id(order_id)
-    
-    # Create order
-    order = Order(
-        id=order_id,
-        buyer_id=user_id,
-        total_amount=total_amount,
-        status="pending",
-        shipping_name=order_data.shipping_address.name,
-        shipping_address_line1=order_data.shipping_address.address_line1,
-        shipping_address_line2=order_data.shipping_address.address_line2,
-        shipping_city=order_data.shipping_address.city,
-        shipping_state=order_data.shipping_address.state,
-        shipping_pincode=order_data.shipping_address.pincode,
-        shipping_mobile=order_data.shipping_address.mobile,
-        payment_method=order_data.payment_method,
-        payment_transaction_id=transaction_id
-    )
-    db.add(order)
-    
-    # Create order items and deduct stock
-    sellers_to_notify = {}
-    email_items = []
-    
-    for item in validated_items:
-        product = item["product"]
-        cart_item = item["cart_item"]
+        total_amount = subtotal + SHIPPING_COST
+        
+        # Generate transaction ID
+        import uuid
+        order_id = str(uuid.uuid4())
+        transaction_id = generate_transaction_id(order_id)
+        
+        # Create order
+        order = Order(
+            id=order_id,
+            buyer_id=user_id,
+            total_amount=total_amount,
+            status="pending",
+            shipping_name=order_data.shipping_address.name,
+            shipping_address_line1=order_data.shipping_address.address_line1,
+            shipping_address_line2=order_data.shipping_address.address_line2,
+            shipping_city=order_data.shipping_address.city,
+            shipping_state=order_data.shipping_address.state,
+            shipping_pincode=order_data.shipping_address.pincode,
+            shipping_mobile=order_data.shipping_address.mobile,
+            payment_method=order_data.payment_method,
+            payment_transaction_id=transaction_id
+        )
+        db.add(order)
+        
+        # Create order items and deduct stock
+        sellers_to_notify = {}
+        email_items = []
+        
+        for item in validated_items:
+            product = item["product"]
+            cart_item = item["cart_item"]
+            
+            # Create order item
+            order_item = OrderItem(
+                order_id=order_id,
+                product_id=product.id,
+                quantity=cart_item.quantity,
+                price_at_order=product.price,
+                seller_id=product.seller_id
+            )
+            db.add(order_item)
+            
+            # Deduct stock
+            product.stock_quantity -= cart_item.quantity
+            
+            # Track sellers to notify
+            if product.seller_id not in sellers_to_notify:
+                seller = db.query(User).filter(User.id == product.seller_id).first()
+                sellers_to_notify[product.seller_id] = {
+                    "seller": seller,
+                    "items": []
+                }
+            sellers_to_notify[product.seller_id]["items"].append({
+                "title": product.title,
+                "quantity": cart_item.quantity
+            })
+            
+            # Items for buyer email
+            email_items.append({
+                "title": product.title,
+                "quantity": cart_item.quantity,
+                "subtotal": product.price * cart_item.quantity
+            })
+            
+            # Check if product is now out of stock
+            if product.stock_quantity == 0:
+                seller = db.query(User).filter(User.id == product.seller_id).first()
+                if seller:
+                    await email_service.send_out_of_stock_alert(
+                        seller.email,
+                        seller.full_name,
+                        product.title,
+                        product.id
+                    )
+        
+        # Clear cart
+        db.query(CartItem).filter(CartItem.cart_id == cart.id).delete()
+        
+        db.commit()
+        db.refresh(order)
+        
+        # Send emails
+        await email_service.send_order_confirmation(
+            buyer.email,
+            buyer.full_name,
+            order.id,
+            total_amount,
+            email_items
+        )
+        
+        # Notify sellers
+        for seller_data in sellers_to_notify.values():
+            seller = seller_data["seller"]
+            if seller:
+                await email_service.send_new_order_notification(
+                    seller.email,
+                    seller.full_name,
+                    order.id,
+                    buyer.full_name,
+                    seller_data["items"]
+                )
+
+        logger.info(
+            "create_order request successful",
+            extra={
+                **log_context,
+                "order_id": order.id,
+                "items_count": len(validated_items),
+                "total_amount": total_amount,
+            },
+        )
+        return order
+    except Exception as e:
+        logger.error(
+            "create_order request failed",
+            extra={**log_context, "error": str(e)},
+            exc_info=True,
+        )
+        raise
+
+
+async def create_buy_now_order(db: Session, user_id: str, order_data: BuyNowOrderCreate) -> Order:
+    """Create order directly from a single product (Buy Now)"""
+    log_context = {
+        "endpoint": "create_buy_now_order",
+        "method": "POST",
+        "user_id": user_id,
+        "product_id": order_data.product_id,
+        "quantity": order_data.quantity,
+        "payment_method": order_data.payment_method,
+    }
+    logger.info("create_buy_now_order request started", extra=log_context)
+
+    try:
+        import uuid
+        
+        # Get user
+        buyer = db.query(User).filter(User.id == user_id).first()
+        if not buyer:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        # Get and validate product
+        product = db.query(Product).filter(Product.id == order_data.product_id).first()
+        
+        if not product:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Product not found"
+            )
+        
+        if product.status != "active":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Product is not available"
+            )
+        
+        if product.stock_quantity < order_data.quantity:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Insufficient stock. Available: {product.stock_quantity}"
+            )
+        
+        # Calculate totals
+        subtotal = product.price * order_data.quantity
+        total_amount = subtotal + SHIPPING_COST
+        
+        # Generate transaction ID
+        order_id = str(uuid.uuid4())
+        transaction_id = generate_transaction_id(order_id)
+        
+        # Create order
+        order = Order(
+            id=order_id,
+            buyer_id=user_id,
+            total_amount=total_amount,
+            status="pending",
+            shipping_name=order_data.shipping_address.name,
+            shipping_address_line1=order_data.shipping_address.address_line1,
+            shipping_address_line2=order_data.shipping_address.address_line2,
+            shipping_city=order_data.shipping_address.city,
+            shipping_state=order_data.shipping_address.state,
+            shipping_pincode=order_data.shipping_address.pincode,
+            shipping_mobile=order_data.shipping_address.mobile,
+            payment_method=order_data.payment_method,
+            payment_transaction_id=transaction_id
+        )
+        db.add(order)
         
         # Create order item
         order_item = OrderItem(
             order_id=order_id,
             product_id=product.id,
-            quantity=cart_item.quantity,
+            quantity=order_data.quantity,
             price_at_order=product.price,
             seller_id=product.seller_id
         )
         db.add(order_item)
         
         # Deduct stock
-        product.stock_quantity -= cart_item.quantity
+        product.stock_quantity -= order_data.quantity
         
-        # Track sellers to notify
-        if product.seller_id not in sellers_to_notify:
-            seller = db.query(User).filter(User.id == product.seller_id).first()
-            sellers_to_notify[product.seller_id] = {
-                "seller": seller,
-                "items": []
-            }
-        sellers_to_notify[product.seller_id]["items"].append({
+        db.commit()
+        db.refresh(order)
+        
+        # Send order confirmation email to buyer
+        email_items = [{
             "title": product.title,
-            "quantity": cart_item.quantity
-        })
+            "quantity": order_data.quantity,
+            "subtotal": subtotal
+        }]
         
-        # Items for buyer email
-        email_items.append({
-            "title": product.title,
-            "quantity": cart_item.quantity,
-            "subtotal": product.price * cart_item.quantity
-        })
+        await email_service.send_order_confirmation(
+            buyer.email,
+            buyer.full_name,
+            order.id,
+            total_amount,
+            email_items
+        )
         
-        # Check if product is now out of stock
-        if product.stock_quantity == 0:
-            seller = db.query(User).filter(User.id == product.seller_id).first()
-            if seller:
-                await email_service.send_out_of_stock_alert(
-                    seller.email,
-                    seller.full_name,
-                    product.title,
-                    product.id
-                )
-    
-    # Clear cart
-    db.query(CartItem).filter(CartItem.cart_id == cart.id).delete()
-    
-    db.commit()
-    db.refresh(order)
-    
-    # Send emails
-    await email_service.send_order_confirmation(
-        buyer.email,
-        buyer.full_name,
-        order.id,
-        total_amount,
-        email_items
-    )
-    
-    # Notify sellers
-    for seller_data in sellers_to_notify.values():
-        seller = seller_data["seller"]
+        # Notify seller
+        seller = db.query(User).filter(User.id == product.seller_id).first()
         if seller:
             await email_service.send_new_order_notification(
                 seller.email,
                 seller.full_name,
                 order.id,
                 buyer.full_name,
-                seller_data["items"]
+                [{"title": product.title, "quantity": order_data.quantity}]
             )
-    
-    return order
+            
+            # Check if product is now out of stock
+            if product.stock_quantity == 0:
+                await email_service.send_out_of_stock_alert(
+                    seller.email,
+                    seller.full_name,
+                    product.title,
+                    product.id
+                )
 
-
-async def create_buy_now_order(db: Session, user_id: str, order_data: BuyNowOrderCreate) -> Order:
-    """Create order directly from a single product (Buy Now)"""
-    import uuid
-    
-    # Get user
-    buyer = db.query(User).filter(User.id == user_id).first()
-    if not buyer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
+        logger.info(
+            "create_buy_now_order request successful",
+            extra={
+                **log_context,
+                "order_id": order.id,
+                "total_amount": total_amount,
+                "remaining_stock": product.stock_quantity,
+            },
         )
-    
-    # Get and validate product
-    product = db.query(Product).filter(Product.id == order_data.product_id).first()
-    
-    if not product:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Product not found"
+        return order
+    except Exception as e:
+        logger.error(
+            "create_buy_now_order request failed",
+            extra={**log_context, "error": str(e)},
+            exc_info=True,
         )
-    
-    if product.status != "active":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Product is not available"
-        )
-    
-    if product.stock_quantity < order_data.quantity:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Insufficient stock. Available: {product.stock_quantity}"
-        )
-    
-    # Calculate totals
-    subtotal = product.price * order_data.quantity
-    total_amount = subtotal + SHIPPING_COST
-    
-    # Generate transaction ID
-    order_id = str(uuid.uuid4())
-    transaction_id = generate_transaction_id(order_id)
-    
-    # Create order
-    order = Order(
-        id=order_id,
-        buyer_id=user_id,
-        total_amount=total_amount,
-        status="pending",
-        shipping_name=order_data.shipping_address.name,
-        shipping_address_line1=order_data.shipping_address.address_line1,
-        shipping_address_line2=order_data.shipping_address.address_line2,
-        shipping_city=order_data.shipping_address.city,
-        shipping_state=order_data.shipping_address.state,
-        shipping_pincode=order_data.shipping_address.pincode,
-        shipping_mobile=order_data.shipping_address.mobile,
-        payment_method=order_data.payment_method,
-        payment_transaction_id=transaction_id
-    )
-    db.add(order)
-    
-    # Create order item
-    order_item = OrderItem(
-        order_id=order_id,
-        product_id=product.id,
-        quantity=order_data.quantity,
-        price_at_order=product.price,
-        seller_id=product.seller_id
-    )
-    db.add(order_item)
-    
-    # Deduct stock
-    product.stock_quantity -= order_data.quantity
-    
-    db.commit()
-    db.refresh(order)
-    
-    # Send order confirmation email to buyer
-    email_items = [{
-        "title": product.title,
-        "quantity": order_data.quantity,
-        "subtotal": subtotal
-    }]
-    
-    await email_service.send_order_confirmation(
-        buyer.email,
-        buyer.full_name,
-        order.id,
-        total_amount,
-        email_items
-    )
-    
-    # Notify seller
-    seller = db.query(User).filter(User.id == product.seller_id).first()
-    if seller:
-        await email_service.send_new_order_notification(
-            seller.email,
-            seller.full_name,
-            order.id,
-            buyer.full_name,
-            [{"title": product.title, "quantity": order_data.quantity}]
-        )
-        
-        # Check if product is now out of stock
-        if product.stock_quantity == 0:
-            await email_service.send_out_of_stock_alert(
-                seller.email,
-                seller.full_name,
-                product.title,
-                product.id
-            )
-    
-    return order
+        raise
 
 
 def get_order_by_id(db: Session, order_id: str, user_id: str, account_type: str) -> Order:
@@ -452,48 +507,68 @@ def get_order_detail(db: Session, order: Order, user_id: str, account_type: str)
 
 async def mark_order_shipped(db: Session, order_id: str, user_id: str) -> Order:
     """Mark order as shipped (seller only)"""
-    # Get order
-    order = db.query(Order).filter(Order.id == order_id).first()
-    
-    if not order:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Order not found"
+    log_context = {
+        "endpoint": "mark_order_shipped",
+        "method": "PUT",
+        "order_id": order_id,
+        "user_id": user_id,
+    }
+    logger.info("mark_order_shipped request started", extra=log_context)
+
+    try:
+        # Get order
+        order = db.query(Order).filter(Order.id == order_id).first()
+        
+        if not order:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Order not found"
+            )
+        
+        # Check seller has products in this order
+        seller_items = db.query(OrderItem).filter(
+            OrderItem.order_id == order_id,
+            OrderItem.seller_id == user_id
+        ).first()
+        
+        if not seller_items:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to ship this order"
+            )
+        
+        if order.status != "pending":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Order is already {order.status}"
+            )
+        
+        # Generate tracking number and update status
+        order.tracking_number = generate_tracking_number(order.id)
+        order.status = "shipped"
+        
+        db.commit()
+        db.refresh(order)
+        
+        # Send notification to buyer
+        buyer = db.query(User).filter(User.id == order.buyer_id).first()
+        if buyer:
+            await email_service.send_shipping_notification(
+                buyer.email,
+                buyer.full_name,
+                order.id,
+                order.tracking_number
+            )
+
+        logger.info(
+            "mark_order_shipped request successful",
+            extra={**log_context, "tracking_number": order.tracking_number},
         )
-    
-    # Check seller has products in this order
-    seller_items = db.query(OrderItem).filter(
-        OrderItem.order_id == order_id,
-        OrderItem.seller_id == user_id
-    ).first()
-    
-    if not seller_items:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to ship this order"
+        return order
+    except Exception as e:
+        logger.error(
+            "mark_order_shipped request failed",
+            extra={**log_context, "error": str(e)},
+            exc_info=True,
         )
-    
-    if order.status != "pending":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Order is already {order.status}"
-        )
-    
-    # Generate tracking number and update status
-    order.tracking_number = generate_tracking_number(order.id)
-    order.status = "shipped"
-    
-    db.commit()
-    db.refresh(order)
-    
-    # Send notification to buyer
-    buyer = db.query(User).filter(User.id == order.buyer_id).first()
-    if buyer:
-        await email_service.send_shipping_notification(
-            buyer.email,
-            buyer.full_name,
-            order.id,
-            order.tracking_number
-        )
-    
-    return order
+        raise
