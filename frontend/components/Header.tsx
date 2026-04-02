@@ -3,15 +3,17 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Search, ShoppingCart, User, LogOut } from "lucide-react";
+import { Search, ShoppingCart, User, LogOut, Heart } from "lucide-react";
 import { Logo } from "./Logo";
 import { useAuthStore } from "@/store/authStore";
 import { useCartStore } from "@/store/cartStore";
+import { useWishlistStore } from "@/store/wishlistStore";
 
 export function Header() {
   const router = useRouter();
   const { user, logout, isAuthenticated } = useAuthStore();
   const { totalItems } = useCartStore();
+  const { totalItems: wishlistTotalItems } = useWishlistStore();
   const [searchQuery, setSearchQuery] = useState("");
 
   const handleSearch = (e: React.FormEvent) => {
@@ -57,6 +59,18 @@ export function Header() {
                 {totalItems > 0 && (
                   <span className="absolute -top-1 -right-1 bg-[#F59E0B] text-white text-xs font-medium rounded-full w-5 h-5 flex items-center justify-center">
                     {totalItems}
+                  </span>
+                )}
+              </Link>
+
+              <Link
+                href="/wishlist"
+                className="relative p-2 hover:bg-[#F3F4F6] rounded-lg transition-colors"
+              >
+                <Heart className="w-5 h-5 text-[#111827]" />
+                {wishlistTotalItems > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-[#EF4444] text-white text-xs font-medium rounded-full w-5 h-5 flex items-center justify-center">
+                    {wishlistTotalItems}
                   </span>
                 )}
               </Link>

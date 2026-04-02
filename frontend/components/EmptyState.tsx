@@ -8,6 +8,7 @@ import {
   ShoppingBag,
   Star,
   AlertCircle,
+  Heart,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 
@@ -69,6 +70,18 @@ export function EmptyOrders() {
       icon={<Package className="w-8 h-8 text-[#9CA3AF]" />}
       title="No orders yet"
       description="When you place an order, it'll appear here. Ready to start shopping?"
+      actionLabel="Browse Products"
+      actionHref="/home"
+    />
+  );
+}
+
+export function EmptyWishlist() {
+  return (
+    <EmptyState
+      icon={<Heart className="w-8 h-8 text-[#9CA3AF]" />}
+      title="Your wishlist is empty"
+      description="Save items you love so you can find them easily later."
       actionLabel="Browse Products"
       actionHref="/home"
     />

@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 import os
 from app.config import settings
 from app.database import engine, Base
-from app.routers import auth, users, products, uploads, seller, cart, orders, reviews
+from app.routers import auth, users, products, uploads, seller, cart, orders, reviews, wishlist
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -31,6 +31,7 @@ app.include_router(products.router, prefix="/api/products", tags=["products"])
 app.include_router(uploads.router, prefix="/api/uploads", tags=["uploads"])
 app.include_router(seller.router, prefix="/api/seller", tags=["seller"])
 app.include_router(cart.router, prefix="/api/cart", tags=["cart"])
+app.include_router(wishlist.router, prefix="/api/wishlist", tags=["wishlist"])
 app.include_router(orders.router, prefix="/api/orders", tags=["orders"])
 app.include_router(reviews.router, prefix="/api/reviews", tags=["reviews"])
 

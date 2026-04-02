@@ -4,11 +4,12 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
-import { Star, ShoppingCart, Zap } from "lucide-react";
+import { Star, ShoppingCart, Zap, Heart } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/Button";
 import { useCartStore } from "@/store/cartStore";
 import { useBuyNowStore } from "@/store/buyNowStore";
+import { useWishlistStore } from "@/store/wishlistStore";
 import { useToast } from "@/components/Toast";
 import { StarRating } from "@/components/StarRating";
 import { ReviewCard, RatingDistribution } from "@/components/ReviewCard";
@@ -57,9 +58,11 @@ export default function ProductDetailPage() {
   const [selectedImage, setSelectedImage] = useState(0);
   const [quantity, setQuantity] = useState(1);
   const [addingToCart, setAddingToCart] = useState(false);
+  const [addingToWishlist, setAddingToWishlist] = useState(false);
   const [buyingNow, setBuyingNow] = useState(false);
   const { addItem } = useCartStore();
   const { setItem: setBuyNowItem } = useBuyNowStore();
+  const { hasProduct } = useWishlistStore();
   
   // Reviews state
   const [reviewsData, setReviewsData] = useState<ReviewsData | null>(null);
@@ -154,6 +157,39 @@ export default function ProductDetailPage() {
     
     // Navigate to checkout
     router.push("/checkout");
+  };
+
+  const handleAddToWishlist = async () => {
+    if (!product) return;
+
+    try {
+      setAddingToWishlist(true);
+      await api.post("/api/wishlist/items", {
+        product_id: product.id,
+      });
+
+      const wishlistData = await api.get<{ items: any[] }>("/api/wishlist");
+      const wishlistItems = wishlistData.items.map((item: any) => ({
+        id: item.id,
+        product: {
+          id: item.product.id,
+          title: item.product.title,
+          price: item.product.price,
+          images: item.product.images || [],
+          stock_quantity: item.product.stock_quantity,
+        },
+      }));
+
+      const { setWishlist } = useWishlistStore.getState();
+      setWishlist(wishlistItems);
+
+      toast.success("Added to wishlist!");
+    } catch (error) {
+      console.error("Failed to add to wishlist:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to add to wishlist");
+    } finally {
+      setAddingToWishlist(false);
+    }
   };
 
   if (loading) {
@@ -299,10 +335,10 @@ export default function ProductDetailPage() {
             </div>
           )}
 
-          <div className="flex gap-3">
+          <div className="flex flex-col sm:flex-row gap-3">
             <Button
               onClick={handleAddToCart}
-              disabled={product.stock_quantity === 0 || addingToCart || buyingNow}
+              disabled={product.stock_quantity === 0 || addingToCart || addingToWishlist || buyingNow}
               isLoading={addingToCart}
               variant="secondary"
               className="flex-1"
@@ -311,8 +347,18 @@ export default function ProductDetailPage() {
               Add to Cart
             </Button>
             <Button
+              onClick={handleAddToWishlist}
+              disabled={addingToCart || addingToWishlist || buyingNow || hasProduct(product.id)}
+              isLoading={addingToWishlist}
+              variant="secondary"
+              className="flex-1"
+            >
+              {!addingToWishlist && <Heart className="w-5 h-5 mr-2" />}
+              {hasProduct(product.id) ? "In wishlist" : "Add to wishlist"}
+            </Button>
+            <Button
               onClick={handleBuyNow}
-              disabled={product.stock_quantity === 0 || addingToCart || buyingNow}
+              disabled={product.stock_quantity === 0 || addingToCart || addingToWishlist || buyingNow}
               isLoading={buyingNow}
               className="flex-1"
             >
