@@ -37,7 +37,7 @@ export const useCartStore = create<CartState>((set) => ({
             ? { ...i, quantity: i.quantity + item.quantity, subtotal: (i.quantity + item.quantity) * i.product.price }
             : i
         );
-        const totalItems = updatedItems.reduce((sum, i) => sum + 1, 0);
+        const totalItems = updatedItems.reduce((sum, i) => sum + i.quantity, 0);
         const totalAmount = updatedItems.reduce((sum, i) => sum + i.subtotal, 0);
         return { items: updatedItems, totalItems, totalAmount };
       }
@@ -52,7 +52,7 @@ export const useCartStore = create<CartState>((set) => ({
       const updatedItems = state.items.map((i) =>
         i.id === itemId ? { ...i, quantity, subtotal: quantity * i.product.price } : i
       );
-      const totalItems = updatedItems.reduce((sum, i) => sum + 1, 0);
+      const totalItems = updatedItems.reduce((sum, i) => sum + i.quantity, 0);
       const totalAmount = updatedItems.reduce((sum, i) => sum + i.subtotal, 0);
       return { items: updatedItems, totalItems, totalAmount };
     });
@@ -60,7 +60,7 @@ export const useCartStore = create<CartState>((set) => ({
   removeItem: (itemId) => {
     set((state) => {
       const updatedItems = state.items.filter((i) => i.id !== itemId);
-      const totalItems = updatedItems.reduce((sum, i) => sum + 1, 0);
+      const totalItems = updatedItems.reduce((sum, i) => sum + i.quantity, 0);
       const totalAmount = updatedItems.reduce((sum, i) => sum + i.subtotal, 0);
       return { items: updatedItems, totalItems, totalAmount };
     });
@@ -69,7 +69,7 @@ export const useCartStore = create<CartState>((set) => ({
     set({ items: [], totalItems: 0, totalAmount: 0 });
   },
   setCart: (items) => {
-    const totalItems = items.reduce((sum, i) => sum + 1, 0);
+    const totalItems = items.reduce((sum, i) => sum + i.quantity, 0);
     const totalAmount = items.reduce((sum, i) => sum + i.subtotal, 0);
     set({ items, totalItems, totalAmount });
   },
